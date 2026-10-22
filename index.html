@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Tuteur de langues</title>
+  <meta name="description" content="Un tuteur de langues IA qui fonctionne hors-ligne, directement dans le navigateur.">
+  <meta name="theme-color" content="#1f6f5c">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app">
+    <aside id="sidebar" class="sidebar">
+      <div class="side-head">
+        <strong>Séances</strong>
+        <button id="newSession" class="btn small" type="button">+ Nouvelle</button>
+      </div>
+      <ul id="sessions" class="sessions"></ul>
+      <div class="side-foot">
+        <button id="openVocab" class="btn ghost" type="button">📚 Mon vocabulaire <span id="vocabCount" class="count">0</span></button>
+        <button id="openSettings" class="btn ghost" type="button">⚙️ Réglages</button>
+      </div>
+    </aside>
+    <div id="scrim" class="scrim"></div>
+
+    <main class="main">
+      <header class="topbar">
+        <button id="menu" class="icon-btn only-mobile" type="button" aria-label="Séances">☰</button>
+        <div class="title">
+          <h1>Tuteur de langues</h1>
+          <span id="status" class="status"></span>
+        </div>
+        <button id="endSession" class="btn small" type="button" title="Résumé de la séance">🏁 Terminer</button>
+      </header>
+
+      <div id="loadbar" class="loadbar" hidden>
+        <div class="loadtext" id="loadtext">Chargement…</div>
+        <div class="progress"><div id="loadfill"></div></div>
+      </div>
+
+      <section id="messages" class="messages" aria-live="polite"></section>
+
+      <div class="composer">
+        <div id="actions" class="chips"></div>
+        <form id="form" class="input-row">
+          <textarea id="input" rows="1" placeholder="Écris ton message…" title="Entrée pour envoyer, Maj+Entrée pour aller à la ligne"></textarea>
+          <button id="send" class="btn primary" type="submit">Envoyer</button>
+          <button id="stop" class="btn" type="button" hidden>■ Stop</button>
+        </form>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="settingsDlg">
+    <form method="dialog" class="dlg">
+      <h2>Réglages</h2>
+      <fieldset>
+        <legend>Mon profil</legend>
+        <label>Langue apprise
+          <input name="language" list="langs" required>
+        </label>
+        <label>Mon niveau
+          <select name="level">
+            <option value="absolute beginner">Débutant absolu</option>
+            <option value="beginner">Débutant</option>
+            <option value="intermediate">Intermédiaire</option>
+            <option value="upper intermediate">Intermédiaire avancé</option>
+            <option value="advanced">Avancé</option>
+          </select>
+        </label>
+        <label>Mon objectif
+          <input name="goals" placeholder="fluent, voyage, travail…">
+        </label>
+        <label>Langue des explications
+          <input name="native" list="langs" required>
+        </label>
+        <datalist id="langs">
+          <option value="French"><option value="English"><option value="Spanish"><option value="German">
+          <option value="Italian"><option value="Portuguese"><option value="Japanese"><option value="Mandarin Chinese">
+          <option value="Korean"><option value="Arabic"><option value="Russian"><option value="Dutch">
+        </datalist>
+      </fieldset>
+
+      <fieldset>
+        <legend>Moteur d'IA</legend>
+        <label class="radio"><input type="radio" name="engine" value="webllm"> Dans le navigateur (WebGPU) : rien à installer</label>
+        <label class="radio"><input type="radio" name="engine" value="api"> Serveur local (Ollama, LM Studio…)</label>
+
+        <div id="webllmFields">
+          <label>Modèle
+            <select name="webllmModel" id="webllmModel"></select>
+          </label>
+          <p class="hint" id="modelInfo"></p>
+          <button type="button" class="btn small" id="deleteModel">Supprimer ce modèle du cache</button>
+        </div>
+
+        <div id="apiFields">
+          <label>Adresse du serveur
+            <input name="apiBase" placeholder="http://localhost:11434/v1">
+          </label>
+          <label>Modèle
+            <span class="row">
+              <input name="apiModel" list="apiModels" placeholder="ex. mistral, qwen3:8b">
+              <button type="button" class="btn small" id="detectModels">Détecter</button>
+            </span>
+          </label>
+          <datalist id="apiModels"></datalist>
+          <p class="hint" id="apiInfo">Ollama : <code>http://localhost:11434/v1</code> · LM Studio : <code>http://localhost:1234/v1</code></p>
+        </div>
+
+        <label>Créativité <output id="tempOut"></output>
+          <input type="range" name="temperature" min="0" max="1.2" step="0.1">
+        </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Mes données (stockées uniquement sur cet appareil)</legend>
+        <div class="row wrap">
+          <button type="button" class="btn small" id="exportData">Exporter (JSON)</button>
+          <label class="btn small file">Importer<input type="file" id="importData" accept="application/json" hidden></label>
+          <button type="button" class="btn small danger" id="wipeData">Tout effacer</button>
+        </div>
+      </fieldset>
+
+      <div class="dlg-actions">
+        <button value="cancel" class="btn" formnovalidate>Annuler</button>
+        <button value="save" class="btn primary">Enregistrer</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="vocabDlg">
+    <form method="dialog" class="dlg">
+      <h2>Mon vocabulaire</h2>
+      <p class="hint">Les mots sont ajoutés automatiquement quand le tuteur en introduit. Le tuteur les réutilise et t'interroge dessus.</p>
+      <div class="row">
+        <input id="vocabFilter" placeholder="Filtrer…">
+      </div>
+      <ul id="vocabList" class="vocab-list"></ul>
+      <details>
+        <summary>Ajouter un mot</summary>
+        <div class="row wrap add-word">
+          <input id="newWord" placeholder="mot">
+          <input id="newPron" placeholder="prononciation">
+          <input id="newMeaning" placeholder="sens">
+          <button type="button" class="btn small" id="addWord">Ajouter</button>
+        </div>
+      </details>
+      <h3>Erreurs à revoir</h3>
+      <ul id="fixList" class="fix-list"></ul>
+      <div class="dlg-actions">
+        <button value="close" class="btn primary">Fermer</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
