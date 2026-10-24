@@ -7,9 +7,10 @@ const PREFILL_CHUNK = 64;
 
 // Modèles proposés (identifiants du catalogue WebLLM), du plus léger au plus capable.
 export const WEBLLM_MODELS = [
-  { id: "Qwen3.5-2B-q4f16_1-MLC", label: "Qwen 3.5 2B — très léger" },
+  { id: "Qwen2.5-1.5B-Instruct-q4f16_1-MLC", label: "Qwen 2.5 1.5B — très léger, pour Mac Intel" },
+  { id: "Qwen3.5-2B-q4f16_1-MLC", label: "Qwen 3.5 2B — léger" },
   { id: "Llama-3.2-3B-Instruct-q4f16_1-MLC", label: "Llama 3.2 3B — léger" },
-  { id: "Qwen3.5-4B-q4f16_1-MLC", label: "Qwen 3.5 4B — recommandé" },
+  { id: "Qwen3.5-4B-q4f16_1-MLC", label: "Qwen 3.5 4B — recommandé (GPU récent)" },
   { id: "Phi-4-mini-instruct-q4f16_1-MLC", label: "Phi-4 mini 3.8B" },
   { id: "Mistral-7B-Instruct-v0.3-q4f16_1-MLC", label: "Mistral 7B v0.3 — bon en français" },
   { id: "Llama-3.1-8B-Instruct-q4f16_1-MLC", label: "Llama 3.1 8B" },
@@ -17,8 +18,20 @@ export const WEBLLM_MODELS = [
   { id: "Qwen3.5-9B-q4f16_1-MLC", label: "Qwen 3.5 9B — le meilleur, lourd" },
 ];
 
+// Sur les puces graphiques Intel (Mac jusqu'à 2020), seuls les tout petits modèles tiennent :
+// au-delà d'environ 1,7 Go, le GPU abandonne en plein calcul.
+export const WEAK_GPU_MAX_MB = 1700;
+export const WEAK_GPU_MODEL = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC";
+
+let adapterPromise = null;
+export async function isWeakGpu() {
+  adapterPromise ??= navigator.gpu?.requestAdapter().catch(() => null) ?? Promise.resolve(null);
+  const adapter = await adapterPromise;
+  return adapter?.info?.vendor === "intel";
+}
+
 function gpuError(e) {
-  if (!/device.*lost|lost.*device|mapAsync|out of memory|GPUBuffer/i.test(String(e?.message || e))) return e;
+  if (!/device.*lost|lost.*device|mapAsync|out of memory|GPUBuffer|instance reference/i.test(String(e?.message || e))) return e;
   return new Error(
     "La carte graphique a abandonné (mémoire graphique insuffisante ou calcul trop long). Réessaie : le modèle va être rechargé. Si ça recommence, choisis un modèle plus léger dans les réglages, ou recharge la page."
   );

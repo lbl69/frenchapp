@@ -1,6 +1,6 @@
 // Service worker : met l'application en cache pour qu'elle s'ouvre sans connexion.
 // Les poids des modèles sont mis en cache séparément par WebLLM (Cache Storage).
-const VERSION = "v4";
+const VERSION = "v5";
 const CACHE = `tuteur-langues-${VERSION}`;
 const SHELL = [
   "./",

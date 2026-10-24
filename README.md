@@ -21,7 +21,9 @@ Tout reste sur l'appareil : aucune donnée n'est envoyée à un serveur.
 | **Dans le navigateur** (WebLLM + WebGPU) | Rien à installer | Après un premier téléchargement du modèle (1 à 6 Go), mis en cache |
 | **Serveur local** (Ollama, LM Studio, llama.cpp…) | Installer le serveur et un modèle | Toujours |
 
-Le moteur WebLLM demande un navigateur avec WebGPU : Chrome/Edge récents, ou Safari 26 et plus. Pour le français, *Qwen 3.5 4B* est un bon compromis. *Mistral 7B* ou *Qwen 3.5 9B* sont meilleurs si ta machine a assez de mémoire.
+Le moteur WebLLM demande un navigateur avec WebGPU : Chrome/Edge récents, ou Safari 26 et plus. Sur un Mac Apple Silicon ou un PC avec une vraie carte graphique, *Qwen 3.5 4B* est un bon compromis. *Mistral 7B* ou *Qwen 3.5 9B* sont meilleurs si la machine a assez de mémoire.
+
+**Mac Intel (jusqu'à 2020) :** la puce graphique intégrée ne supporte que les tout petits modèles. Au-delà d'environ 1,7 Go, le GPU abandonne en plein calcul (« Device is lost »). L'app le détecte : elle propose *Qwen 2.5 1.5B*, qui fonctionne mais reste un tuteur limité, et prévient avant de choisir un modèle plus lourd. Pour un tuteur de bonne qualité sur ces Mac, utilise plutôt le serveur local (Ollama), qui tourne sur le processeur.
 
 ### Avec Ollama
 

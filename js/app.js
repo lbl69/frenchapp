@@ -1,6 +1,7 @@
 import { buildSystemPrompt, QUICK_ACTIONS, SESSION_START, SESSION_END } from "./prompt.js";
 import {
   getEngine, WEBLLM_MODELS, webllmInfo, deleteWebllmModel, listApiModels, CONTEXT_TOKENS,
+  isWeakGpu, WEAK_GPU_MAX_MB, WEAK_GPU_MODEL,
 } from "./engines.js";
 import { renderMarkdown } from "./markdown.js";
 
@@ -408,6 +409,9 @@ async function send(text, { hidden = false } = {}) {
     if (data.settings.engine === "api" && /fetch|network|load failed/i.test(msg)) {
       msg = `Impossible de joindre le serveur local (${data.settings.apiBase}). Vérifiez qu'il est lancé et qu'il accepte cette origine (pour Ollama : OLLAMA_ORIGINS).`;
     }
+    if (data.settings.engine === "webllm" && data.settings.webllmModel !== WEAK_GPU_MODEL && (await isWeakGpu())) {
+      msg += " Ta carte graphique est une puce Intel : seuls les tout petits modèles y tiennent (Qwen 2.5 1.5B). Pour un tuteur plus capable, utilise le serveur local (Ollama).";
+    }
     showError(msg, content ? null : () => send(text, { hidden }));
   }
   scrollDown();
@@ -505,9 +509,10 @@ async function showModelInfo() {
   try {
     const { vram, cached } = await webllmInfo(id);
     if (form.webllmModel.value !== id) return;
+    const tooBig = vram > WEAK_GPU_MAX_MB && (await isWeakGpu());
     $("#modelInfo").textContent = `${vram ? `≈ ${(vram / 1024).toFixed(1)} Go de mémoire graphique. ` : ""}${
       cached ? "✅ Déjà téléchargé : utilisable hors-ligne." : "⬇️ Sera téléchargé au premier usage (connexion requise une seule fois)."
-    }`;
+    }${tooBig ? " ⚠️ Trop lourd pour ta carte graphique Intel : il risque de planter. Choisis Qwen 2.5 1.5B, ou le serveur local pour un meilleur tuteur." : ""}`;
     $("#deleteModel").hidden = !cached;
   } catch {
     $("#modelInfo").textContent = "";
@@ -694,4 +699,8 @@ updateStatus();
 updateVocabCount();
 renderSessions();
 renderMessages();
-if (firstRun) openSettings();
+if (firstRun) {
+  // Sur une puce graphique Intel, on part du seul modèle qui y fonctionne de façon fiable.
+  if (await isWeakGpu()) data.settings.webllmModel = WEAK_GPU_MODEL;
+  openSettings();
+}
