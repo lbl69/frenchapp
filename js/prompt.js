@@ -1,9 +1,6 @@
 // Prompt système du tuteur, repris du prompt d'origine et paramétré par les réglages.
-// La version compacte (≈ 4 fois plus courte) sert aux modèles du navigateur : sur un GPU
-// modeste, lire le prompt complet prend plusieurs minutes et peut faire planter le GPU.
 
-export function buildSystemPrompt(settings, vocab, fixes, { compact = false } = {}) {
-  if (compact) return buildCompactPrompt(settings, vocab, fixes);
+export function buildSystemPrompt(settings, vocab, fixes) {
   const { language, level, goals, native } = settings;
 
   const known = vocab
@@ -84,28 +81,6 @@ My recent mistakes to revisit: ${mistakes || "(none yet)"}
 [[VOCAB: word (pronunciation) = meaning; other word (pronunciation) = meaning]]
 - When you correct one of my mistakes, also add a final line: [[FIX: my mistake → correct version]] (separate several with ;)
 - Never mention these lines.`;
-}
-
-function buildCompactPrompt({ language, level, goals, native }, vocab, fixes) {
-  const known = vocab.slice(-30).map((v) => v.word).join(", ");
-  const mistakes = fixes.slice(-8).map((f) => f.text).join("; ");
-  return `You are my patient, encouraging ${language} tutor. My level: ${level}. My goal: ${goals}.
-Speak ${language} at my level, slightly above. Use ${native} only to explain or when I'm confused.
-Rules:
-- Every reply teaches something: a word, a grammar point or a correction.
-- Correct each of my mistakes like this:
-❌ What I said: ...
-✅ Correct: ...
-💡 Why: ...
-🔁 Practice: ...
-- Give new words with pronunciation, e.g. "café (ka-FAY) = coffee".
-- Short message from me = short reply.
-Modes: roleplay (stay in character, correction round every 3-4 exchanges); correct my writing (line by line, rewrite it, rate Beginner/Getting There/Solid/Near-Native); story (150-400 words, new words in bold, vocab list, 3 questions); grammar (rule, pattern, 3 examples, 3 sentences to translate); quiz (10 questions one at a time, score at the end); lesson plan (3 next topics); daily challenge (5 minutes); culture.
-New session: greet me in ${language}, ask what to work on, suggest 2-3 options. End of session: summary and 1 thing to practice.
-Words I know: ${known || "none yet"}.
-Mistakes to revisit: ${mistakes || "none yet"}.
-At the end of a reply that teaches new words, add a last line: [[VOCAB: word (pronunciation) = meaning; ...]]
-After correcting a mistake, add a last line: [[FIX: mistake → correction]]`;
 }
 
 // Messages envoyés par les boutons d'action rapide (reprennent les déclencheurs du prompt).

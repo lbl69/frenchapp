@@ -1,8 +1,8 @@
-# Tuteur de langues (hors-ligne)
+# Tuteur de langues
 
-Un tuteur de langues personnel propulsé par l'IA, qui **fonctionne sans Internet**. L'application suit le prompt « personal language tutor » : conversation, corrections détaillées (❌ ✅ 💡 🔁), histoires, grammaire, quiz, plan de leçons, défi du jour, culture, et résumé de fin de séance.
+Un tuteur de langues personnel propulsé par **Claude** (Anthropic). L'application suit le prompt « personal language tutor » : conversation, corrections détaillées (❌ ✅ 💡 🔁), histoires, grammaire, quiz, plan de leçons, défi du jour, culture, et résumé de fin de séance.
 
-Tout reste sur l'appareil : aucune donnée n'est envoyée à un serveur.
+C'est un site statique, sans serveur : le navigateur appelle directement l'API Claude avec ta clé.
 
 ## Fonctionnalités
 
@@ -10,34 +10,39 @@ Tout reste sur l'appareil : aucune donnée n'est envoyée à un serveur.
 - **Actions rapides** : jeu de rôle, correction de texte, histoire, grammaire, quiz, « que faire ensuite ? », défi du jour, culture.
 - **Mémoire** : le tuteur repère le vocabulaire qu'il t'enseigne et les erreurs qu'il corrige. Il les enregistre, puis les réutilise et t'interroge dessus d'une séance à l'autre.
 - **Séances** : historique local, bouton 🏁 *Terminer* pour obtenir le résumé de la séance.
-- **Prononciation** : bouton 🔊 qui utilise les voix du système (fonctionne hors-ligne).
-- **Sauvegarde** : export/import JSON de toutes tes données.
-- **PWA** : installable sur ordinateur et mobile, l'interface s'ouvre sans connexion.
+- **Prononciation** : bouton 🔊 qui utilise les voix du système.
+- **Sauvegarde** : export/import JSON de tes séances et de ton vocabulaire. La clé API n'est jamais exportée.
+- **PWA** : installable sur ordinateur et mobile. L'historique reste consultable sans connexion, mais parler au tuteur demande Internet.
 
-## Deux moteurs d'IA, tous deux hors-ligne
+## Démarrer
 
-| Moteur | Installation | Hors-ligne |
-|---|---|---|
-| **Dans le navigateur** (WebLLM + WebGPU) | Rien à installer | Après un premier téléchargement du modèle (1 à 6 Go), mis en cache |
-| **Serveur local** (Ollama, LM Studio, llama.cpp…) | Installer le serveur et un modèle | Toujours |
+1. Crée une clé API sur [console.anthropic.com](https://console.anthropic.com/settings/keys) et ajoute un peu de crédit (*Billing*).
+2. Ouvre l'app, puis colle la clé dans **⚙️ Réglages → Clé API**.
+3. Choisis le modèle :
+   - **Claude Haiku 5.5** (par défaut) : rapide et très économique, environ un centime par séance.
+   - **Claude Sonnet 5.5** : explications et corrections plus fines, environ 20 fois plus cher que Haiku, mais une séance reste de l'ordre de quelques dizaines de centimes.
 
-Le moteur WebLLM demande un navigateur avec WebGPU : Chrome/Edge récents, ou Safari 26 et plus. Sur un Mac Apple Silicon ou un PC avec une vraie carte graphique, *Qwen 3.5 4B* est un bon compromis. *Mistral 7B* ou *Qwen 3.5 9B* sont meilleurs si la machine a assez de mémoire.
+La clé est stockée uniquement dans le navigateur de cet appareil (`localStorage`) et n'est envoyée qu'à `api.anthropic.com`. Comme toute clé utilisée côté navigateur, ne l'utilise que sur un appareil qui t'appartient. Tu peux fixer un plafond de dépense mensuel dans la console Anthropic.
 
-**Mac Intel (jusqu'à 2020) :** la puce graphique intégrée ne supporte que les tout petits modèles. Au-delà d'environ 1,7 Go, le GPU abandonne en plein calcul (« Device is lost »). L'app le détecte : elle propose *Qwen 2.5 1.5B*, qui fonctionne mais reste un tuteur limité, et prévient avant de choisir un modèle plus lourd. Pour un tuteur de bonne qualité sur ces Mac, utilise plutôt le serveur local (Ollama), qui tourne sur le processeur.
+### Détails techniques
 
-### Avec Ollama
+- Appels via le SDK officiel `@anthropic-ai/sdk`, chargé depuis jsDelivr, avec `dangerouslyAllowBrowser: true`.
+- Réponses en streaming, effort `low` (un tuteur qui converse n'a pas besoin de longue réflexion).
+- Le prompt du tuteur est mis en cache (*prompt caching*) : il ne coûte presque rien à partir du 2e message d'une séance.
+- Sur Sonnet 5.5, si un filtre de sécurité refuse un message à tort, l'API bascule automatiquement sur un autre modèle (`fallbacks: "default"`).
+
+### Option : serveur local
+
+L'app peut aussi utiliser un serveur local compatible OpenAI (Ollama, LM Studio…), sans clé :
 
 ```bash
 ollama pull mistral
 OLLAMA_ORIGINS="*" ollama serve
 ```
 
-Dans les réglages, choisis « Serveur local », garde l'adresse `http://localhost:11434/v1` et clique sur *Détecter*.
-`OLLAMA_ORIGINS` sert à autoriser la page à parler à Ollama. Ce n'est pas nécessaire si l'app est servie depuis `localhost`.
+Dans les réglages, choisis « Serveur local » et clique sur *Détecter*.
 
-## Lancer l'app
-
-C'est un site statique, sans étape de build. Il faut juste le servir en HTTP (pas en `file://`) :
+## Lancer en local
 
 ```bash
 python3 -m http.server 8000
@@ -47,7 +52,7 @@ Ouvre ensuite <http://localhost:8000>.
 
 ### Publier sur GitHub Pages
 
-Dans le dépôt GitHub, va dans *Settings → Pages → Build and deployment*, choisis *Deploy from a branch*, puis la branche `main` et le dossier `/ (root)`. L'app sera publiée sur `https://<utilisateur>.github.io/<dépôt>/`. Ouvre l'URL une fois avec une connexion, puis installe l'app (« Installer » / « Ajouter à l'écran d'accueil »). Elle fonctionne ensuite hors-ligne.
+Dans le dépôt GitHub, va dans *Settings → Pages → Build and deployment*, choisis *Deploy from a branch*, puis la branche `main` et le dossier `/ (root)`.
 
 ## Structure
 
@@ -56,10 +61,9 @@ index.html            interface
 css/style.css         styles (clair/sombre)
 js/app.js             logique : séances, mémoire, réglages
 js/prompt.js          prompt système du tuteur
-js/engines.js         moteurs WebLLM et serveur local (API compatible OpenAI)
+js/engines.js         API Claude et serveur local
 js/markdown.js        rendu Markdown minimal
-sw.js                 service worker (cache hors-ligne)
-vendor/web-llm/       @mlc-ai/web-llm 0.2.84 (Apache-2.0), inclus pour fonctionner hors-ligne
+sw.js                 service worker (installation, interface hors connexion)
 ```
 
 Pour modifier le comportement du tuteur, édite `js/prompt.js`. Après avoir modifié des fichiers, incrémente `VERSION` dans `sw.js`.

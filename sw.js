@@ -1,6 +1,6 @@
-// Service worker : met l'application en cache pour qu'elle s'ouvre sans connexion.
-// Les poids des modèles sont mis en cache séparément par WebLLM (Cache Storage).
-const VERSION = "v5";
+// Service worker : rend l'app installable et garde l'interface (et l'historique) consultable
+// sans connexion. Parler au tuteur demande Internet.
+const VERSION = "v6";
 const CACHE = `tuteur-langues-${VERSION}`;
 const SHELL = [
   "./",
@@ -10,7 +10,6 @@ const SHELL = [
   "js/engines.js",
   "js/prompt.js",
   "js/markdown.js",
-  "vendor/web-llm/index.js",
   "manifest.webmanifest",
   "icons/icon.svg",
   "icons/icon-192.png",
@@ -22,6 +21,7 @@ self.addEventListener("install", (e) => {
 });
 
 self.addEventListener("activate", (e) => {
+  // Supprime aussi les anciens caches, dont celui qui contenait la bibliothèque WebLLM.
   e.waitUntil(
     caches
       .keys()
@@ -34,13 +34,7 @@ self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== "GET" || url.origin !== location.origin) return;
 
-  // La bibliothèque WebLLM (6 Mo) ne change qu'avec la version : cache d'abord.
-  if (url.pathname.includes("/vendor/")) {
-    e.respondWith(caches.match(e.request).then((hit) => hit || fetch(e.request)));
-    return;
-  }
-
-  // Le reste : réseau d'abord (pour recevoir les mises à jour), cache si hors-ligne.
+  // Réseau d'abord (pour recevoir les mises à jour), cache si hors-ligne.
   e.respondWith(
     fetch(e.request)
       .then((res) => {

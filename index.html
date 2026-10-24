@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Tuteur de langues</title>
-  <meta name="description" content="Un tuteur de langues IA qui fonctionne hors-ligne, directement dans le navigateur.">
+  <meta name="description" content="Un tuteur de langues personnel propulsé par Claude.">
   <meta name="theme-color" content="#1f6f5c">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
@@ -35,11 +35,6 @@
         </div>
         <button id="endSession" class="btn small" type="button" title="Résumé de la séance">🏁 Terminer</button>
       </header>
-
-      <div id="loadbar" class="loadbar" hidden>
-        <div class="loadtext" id="loadtext">Chargement…</div>
-        <div class="progress"><div id="loadfill"></div></div>
-      </div>
 
       <section id="messages" class="messages" aria-live="polite"></section>
 
@@ -86,15 +81,20 @@
 
       <fieldset>
         <legend>Moteur d'IA</legend>
-        <label class="radio"><input type="radio" name="engine" value="webllm"> Dans le navigateur (WebGPU) : rien à installer</label>
+        <label class="radio"><input type="radio" name="engine" value="claude"> Claude (Anthropic) : nécessite une clé API</label>
         <label class="radio"><input type="radio" name="engine" value="api"> Serveur local (Ollama, LM Studio…)</label>
 
-        <div id="webllmFields">
-          <label>Modèle
-            <select name="webllmModel" id="webllmModel"></select>
+        <div id="claudeFields">
+          <label>Clé API
+            <span class="row">
+              <input name="claudeKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-ant-…">
+              <button type="button" class="btn small" id="toggleKey">👁</button>
+            </span>
           </label>
-          <p class="hint" id="modelInfo"></p>
-          <button type="button" class="btn small" id="deleteModel">Supprimer ce modèle du cache</button>
+          <p class="hint">Crée une clé sur <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>. Elle reste dans ce navigateur, n'est envoyée qu'à Anthropic et n'est jamais incluse dans l'export.</p>
+          <label>Modèle
+            <select name="claudeModel"></select>
+          </label>
         </div>
 
         <div id="apiFields">
@@ -110,10 +110,6 @@
           <datalist id="apiModels"></datalist>
           <p class="hint" id="apiInfo">Ollama : <code>http://localhost:11434/v1</code> · LM Studio : <code>http://localhost:1234/v1</code></p>
         </div>
-
-        <label>Créativité <output id="tempOut"></output>
-          <input type="range" name="temperature" min="0" max="1.2" step="0.1">
-        </label>
       </fieldset>
 
       <fieldset>

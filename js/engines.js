@@ -1,125 +1,89 @@
-// Deux moteurs, tous deux utilisables sans Internet :
-//  - "webllm" : le modèle tourne dans le navigateur (WebGPU), téléchargé une seule fois puis mis en cache ;
+// Deux moteurs :
+//  - "claude" : l'API Claude d'Anthropic, appelée directement depuis le navigateur avec ta clé ;
 //  - "api"    : un serveur local compatible OpenAI (Ollama, LM Studio, llama.cpp…).
 
-export const CONTEXT_TOKENS = 8192;
-const PREFILL_CHUNK = 64;
+// Version du SDK officiel, chargée depuis un CDN (le site n'a pas d'étape de build).
+const SDK_URL = "https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.132.1/+esm";
 
-// Modèles proposés (identifiants du catalogue WebLLM), du plus léger au plus capable.
-export const WEBLLM_MODELS = [
-  { id: "Qwen2.5-1.5B-Instruct-q4f16_1-MLC", label: "Qwen 2.5 1.5B — très léger, pour Mac Intel" },
-  { id: "Qwen3.5-2B-q4f16_1-MLC", label: "Qwen 3.5 2B — léger" },
-  { id: "Llama-3.2-3B-Instruct-q4f16_1-MLC", label: "Llama 3.2 3B — léger" },
-  { id: "Qwen3.5-4B-q4f16_1-MLC", label: "Qwen 3.5 4B — recommandé (GPU récent)" },
-  { id: "Phi-4-mini-instruct-q4f16_1-MLC", label: "Phi-4 mini 3.8B" },
-  { id: "Mistral-7B-Instruct-v0.3-q4f16_1-MLC", label: "Mistral 7B v0.3 — bon en français" },
-  { id: "Llama-3.1-8B-Instruct-q4f16_1-MLC", label: "Llama 3.1 8B" },
-  { id: "gemma-2-9b-it-q4f16_1-MLC", label: "Gemma 2 9B" },
-  { id: "Qwen3.5-9B-q4f16_1-MLC", label: "Qwen 3.5 9B — le meilleur, lourd" },
+export const CLAUDE_MODELS = [
+  { id: "claude-haiku-5-5", label: "Claude Haiku 5.5 — rapide et économique" },
+  { id: "claude-sonnet-5-5", label: "Claude Sonnet 5.5 — corrections plus fines" },
 ];
 
-// Sur les puces graphiques Intel (Mac jusqu'à 2020), seuls les tout petits modèles tiennent :
-// au-delà d'environ 1,7 Go, le GPU abandonne en plein calcul.
-export const WEAK_GPU_MAX_MB = 1700;
-export const WEAK_GPU_MODEL = "Qwen2.5-1.5B-Instruct-q4f16_1-MLC";
-
-let adapterPromise = null;
-export async function isWeakGpu() {
-  adapterPromise ??= navigator.gpu?.requestAdapter().catch(() => null) ?? Promise.resolve(null);
-  const adapter = await adapterPromise;
-  return adapter?.info?.vendor === "intel";
+// Taille d'historique renvoyée à chaque message, en caractères (≈ 3 caractères par token).
+export function historyBudget(settings) {
+  return settings.engine === "claude" ? 400_000 : (8192 - 1500) * 3;
 }
 
-function gpuError(e) {
-  if (!/device.*lost|lost.*device|mapAsync|out of memory|GPUBuffer|instance reference/i.test(String(e?.message || e))) return e;
-  return new Error(
-    "La carte graphique a abandonné (mémoire graphique insuffisante ou calcul trop long). Réessaie : le modèle va être rechargé. Si ça recommence, choisis un modèle plus léger dans les réglages, ou recharge la page."
-  );
-}
+let sdk = null;
+const loadSdk = async () => (sdk ??= await import(SDK_URL));
 
-let webllm = null;
-const loadLib = async () => (webllm ??= await import("../vendor/web-llm/index.js"));
-
-export async function webllmInfo(modelId) {
-  const lib = await loadLib();
-  const rec = lib.prebuiltAppConfig.model_list.find((m) => m.model_id === modelId);
-  let cached = false;
-  try {
-    cached = await lib.hasModelInCache(modelId);
-  } catch {}
-  return { vram: rec?.vram_required_MB, cached };
-}
-
-export async function deleteWebllmModel(modelId) {
-  const lib = await loadLib();
-  await lib.deleteModelAllInfoInCache(modelId);
-}
-
-class WebLLMEngine {
-  constructor() {
-    this.engine = null;
-    this.modelId = null;
+class ClaudeEngine {
+  constructor(apiKey, model) {
+    this.apiKey = apiKey;
+    this.model = model;
   }
 
-  async load(modelId, onProgress) {
-    if (this.engine && this.modelId === modelId) return;
-    if (!navigator.gpu) {
-      throw new Error(
-        "WebGPU n'est pas disponible dans ce navigateur. Utilisez Chrome, Edge ou Safari récent, ou passez au moteur « Serveur local » dans les réglages."
-      );
-    }
-    const lib = await loadLib();
-    // Certains GPU ne gèrent pas le f16 : on bascule alors sur la variante f32 du même modèle.
-    const adapter = await navigator.gpu.requestAdapter();
-    let id = modelId;
-    if (adapter && !adapter.features.has("shader-f16") && id.includes("q4f16_1")) {
-      const alt = id.replace("q4f16_1", "q4f32_1");
-      if (lib.prebuiltAppConfig.model_list.some((m) => m.model_id === alt)) id = alt;
-    }
-    await this.reset();
-    try {
-      this.engine = await lib.CreateMLCEngine(
-        id,
-        { initProgressCallback: (r) => onProgress?.(r.progress, r.text) },
-        // Traité d'un bloc, le prompt dépasse le délai que macOS accorde au GPU
-        // (« Device is lost »), surtout sur puce Intel : on le découpe en petits morceaux.
-        { context_window_size: CONTEXT_TOKENS, prefill_chunk_size: PREFILL_CHUNK }
-      );
-    } catch (e) {
-      throw gpuError(e);
-    }
-    this.modelId = modelId;
+  async load() {
+    if (!this.apiKey) throw new Error("Saisis ta clé API Claude dans les réglages (⚙️).");
+    const { default: Anthropic } = await loadSdk();
+    // La clé reste dans ce navigateur : elle n'est envoyée qu'à api.anthropic.com.
+    this.client = new Anthropic({ apiKey: this.apiKey, dangerouslyAllowBrowser: true });
   }
 
-  // Après une erreur GPU le moteur est inutilisable : on l'oublie pour qu'il soit rechargé.
-  async reset() {
-    const engine = this.engine;
-    this.engine = null;
-    this.modelId = null;
-    try {
-      await engine?.unload();
-    } catch {}
-  }
-
-  async stream(messages, onDelta, signal, opts) {
-    const onAbort = () => this.engine?.interruptGenerate();
+  async stream(messages, onDelta, signal) {
+    const [system, ...history] = messages;
+    const params = {
+      model: this.model,
+      max_tokens: 64000,
+      // Un tuteur qui converse : peu de réflexion, réponses rapides.
+      output_config: { effort: "low" },
+      // Le prompt du tuteur est identique d'un message à l'autre : on le met en cache.
+      system: [{ type: "text", text: system.content, cache_control: { type: "ephemeral" } }],
+      cache_control: { type: "ephemeral" },
+      messages: history,
+    };
+    // Sur Sonnet, si un filtre de sécurité refuse à tort, l'API bascule seule sur un autre modèle.
+    const stream =
+      this.model === "claude-sonnet-5-5"
+        ? this.client.beta.messages.stream({ ...params, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" })
+        : this.client.messages.stream(params);
+    const onAbort = () => stream.abort();
     signal.addEventListener("abort", onAbort);
     try {
-      const req = { messages, stream: true, temperature: opts.temperature };
-      if (/^Qwen3/.test(this.modelId)) req.extra_body = { enable_thinking: false };
-      const chunks = await this.engine.chat.completions.create(req);
-      for await (const chunk of chunks) {
-        const d = chunk.choices[0]?.delta?.content;
-        if (d) onDelta(d);
+      for await (const event of stream) {
+        if (event.type === "content_block_delta" && event.delta.type === "text_delta") onDelta(event.delta.text);
+      }
+      const final = await stream.finalMessage();
+      if (final.stop_reason === "refusal") {
+        onDelta("\n\n*(Le modèle a refusé de répondre à ce message. Reformule-le ou passe à autre chose.)*");
       }
     } catch (e) {
-      if (e?.name === "AbortError" && signal.aborted) throw e;
-      await this.reset();
-      throw gpuError(e);
+      throw claudeError(e, signal);
     } finally {
       signal.removeEventListener("abort", onAbort);
     }
   }
+}
+
+function claudeError(e, signal) {
+  const E = sdk;
+  if (signal.aborted || e instanceof E.APIUserAbortError) {
+    const abort = new Error("Arrêté");
+    abort.name = "AbortError";
+    return abort;
+  }
+  if (e instanceof E.AuthenticationError) return new Error("Clé API refusée. Vérifie-la dans les réglages (⚙️).");
+  if (e instanceof E.PermissionDeniedError) return new Error("Cette clé API n'a pas accès à ce modèle.");
+  if (e instanceof E.RateLimitError) return new Error("Trop de requêtes, ou crédit épuisé sur ton compte Anthropic. Réessaie dans un instant.");
+  if (e instanceof E.BadRequestError) {
+    const msg = e.error?.error?.message || e.message;
+    if (/credit|billing/i.test(msg)) return new Error("Crédit insuffisant sur ton compte Anthropic (console.anthropic.com → Billing).");
+    return new Error(`Requête refusée par l'API : ${msg}`);
+  }
+  if (e instanceof E.InternalServerError) return new Error("L'API Claude est momentanément indisponible. Réessaie dans un instant.");
+  if (e instanceof E.APIConnectionError) return new Error("Impossible de joindre l'API Claude. Vérifie ta connexion Internet.");
+  return e;
 }
 
 class ApiEngine {
@@ -132,11 +96,11 @@ class ApiEngine {
     if (!this.model) throw new Error("Choisissez un modèle pour le serveur local dans les réglages.");
   }
 
-  async stream(messages, onDelta, signal, opts) {
+  async stream(messages, onDelta, signal) {
     const res = await fetch(`${this.base}/chat/completions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: this.model, messages, stream: true, temperature: opts.temperature }),
+      body: JSON.stringify({ model: this.model, messages, stream: true }),
       signal,
     });
     if (!res.ok) throw new Error(`Le serveur local a répondu ${res.status} : ${await res.text()}`);
@@ -170,12 +134,8 @@ export async function listApiModels(base) {
   return (json.data || []).map((m) => m.id);
 }
 
-const webllmEngine = new WebLLMEngine();
-
 export function getEngine(settings) {
-  return settings.engine === "api" ? new ApiEngine(settings.apiBase, settings.apiModel) : webllmEngine;
-}
-
-export function engineModelId(settings) {
-  return settings.engine === "api" ? settings.apiModel : settings.webllmModel;
+  return settings.engine === "api"
+    ? new ApiEngine(settings.apiBase, settings.apiModel)
+    : new ClaudeEngine(settings.claudeKey, settings.claudeModel);
 }

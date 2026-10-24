@@ -1,7 +1,7 @@
 {
   "name": "Tuteur de langues",
   "short_name": "Tuteur",
-  "description": "Un tuteur de langues IA qui fonctionne hors-ligne.",
+  "description": "Un tuteur de langues personnel propulsé par Claude.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

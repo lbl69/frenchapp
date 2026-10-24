@@ -1,7 +1,6 @@
 import { buildSystemPrompt, QUICK_ACTIONS, SESSION_START, SESSION_END } from "./prompt.js";
 import {
-  getEngine, WEBLLM_MODELS, webllmInfo, deleteWebllmModel, listApiModels, CONTEXT_TOKENS,
-  isWeakGpu, WEAK_GPU_MAX_MB, WEAK_GPU_MODEL,
+  getEngine, CLAUDE_MODELS, historyBudget, listApiModels,
 } from "./engines.js";
 import { renderMarkdown } from "./markdown.js";
 
@@ -13,11 +12,11 @@ const DEFAULTS = {
   level: "intermediate",
   goals: "fluent",
   native: "English",
-  engine: "webllm",
-  webllmModel: "Qwen3.5-4B-q4f16_1-MLC",
+  engine: "claude",
+  claudeKey: "",
+  claudeModel: "claude-haiku-5-5",
   apiBase: "http://localhost:11434/v1",
   apiModel: "",
-  temperature: 0.7,
 };
 
 // ---------- Données (localStorage, uniquement sur cet appareil) ----------
@@ -33,6 +32,9 @@ const stored = readStore();
 const firstRun = !stored;
 const data = stored || { settings: {}, sessions: [], currentId: null, vocab: [], fixes: [] };
 data.settings = { ...DEFAULTS, ...data.settings };
+// Réglages d'une version précédente : le moteur dans le navigateur (WebLLM) n'existe plus.
+if (data.settings.engine === "webllm") data.settings.engine = "claude";
+for (const k of Object.keys(data.settings)) if (!(k in DEFAULTS)) delete data.settings[k];
 
 function save() {
   try {
@@ -197,7 +199,7 @@ function renderMessages() {
   const visible = s ? s.messages.filter((m) => !m.hidden) : [];
   if (!visible.length && !busy) {
     messagesEl.innerHTML = `<div class="empty"><div class="big">🗣️</div>
-      <p>Ton tuteur personnel, qui fonctionne même sans Internet.</p>
+      <p>Ton tuteur de langues personnel.</p>
       <button class="btn primary" type="button" id="startBtn">Commencer une séance</button></div>`;
     $("#startBtn").onclick = () => (s ? greet() : newSession());
     return;
@@ -251,7 +253,7 @@ function updateStatus() {
   const st = data.settings;
   const model = st.engine === "api"
     ? `Serveur local · ${st.apiModel || "aucun modèle"}`
-    : WEBLLM_MODELS.find((m) => m.id === st.webllmModel)?.label.split(" — ")[0] ?? st.webllmModel;
+    : CLAUDE_MODELS.find((m) => m.id === st.claudeModel)?.label.split(" — ")[0] ?? st.claudeModel;
   $("#status").innerHTML = `<span class="dot ${engineReady ? "ok" : ""}"></span>${st.language} · ${model} · ${
     navigator.onLine ? "en ligne" : "hors-ligne"
   }`;
@@ -274,36 +276,16 @@ function setBusy(b) {
 }
 
 async function ensureLoaded(engine) {
-  if (data.settings.engine !== "webllm") {
-    await engine.load();
-    engineReady = true;
-    updateStatus();
-    return;
-  }
-  const bar = $("#loadbar");
-  bar.hidden = false;
-  $("#loadtext").textContent = "Préparation du modèle…";
-  try {
-    await engine.load(data.settings.webllmModel, (p, text) => {
-      $("#loadfill").style.width = `${Math.round(p * 100)}%`;
-      $("#loadtext").textContent = /fetch|download/i.test(text)
-        ? `Premier téléchargement du modèle (une seule fois, ensuite hors-ligne) — ${Math.round(p * 100)} %`
-        : `Chargement du modèle en mémoire — ${Math.round(p * 100)} %`;
-    });
-    engineReady = true;
-  } finally {
-    bar.hidden = true;
-    updateStatus();
-  }
+  await engine.load();
+  engineReady = true;
+  updateStatus();
 }
 
 function modelMessages(s) {
   // Prompt figé pour toute la séance : un début de conversation identique permet au moteur
   // de réutiliser ce qu'il a déjà calculé au lieu de tout retraiter à chaque message.
-  const sys = (s.system ||= buildSystemPrompt(data.settings, data.vocab, data.fixes, {
-    compact: data.settings.engine === "webllm",
-  }));
-  let budget = (CONTEXT_TOKENS - 1500) * 3 - sys.length;
+  const sys = (s.system ||= buildSystemPrompt(data.settings, data.vocab, data.fixes));
+  let budget = historyBudget(data.settings) - sys.length;
   const hist = [];
   for (let i = s.messages.length - 1; i >= 0; i--) {
     const m = s.messages[i];
@@ -378,9 +360,9 @@ async function send(text, { hidden = false } = {}) {
     await engine.stream(modelMessages(s), (d) => {
       raw += d;
       frame ||= requestAnimationFrame(paint);
-    }, controller.signal, { temperature: Number(data.settings.temperature) });
+    }, controller.signal);
   } catch (e) {
-    // Une erreur GPU (« Device is lost ») porte aussi le nom AbortError : seul le bouton Stop est un arrêt voulu.
+    // Seul le bouton Stop est un arrêt voulu : toute autre erreur est affichée.
     if (!(e.name === "AbortError" && controller.signal.aborted)) failure = e;
   }
   cancelAnimationFrame(frame);
@@ -408,9 +390,6 @@ async function send(text, { hidden = false } = {}) {
     let msg = failure.message || String(failure);
     if (data.settings.engine === "api" && /fetch|network|load failed/i.test(msg)) {
       msg = `Impossible de joindre le serveur local (${data.settings.apiBase}). Vérifiez qu'il est lancé et qu'il accepte cette origine (pour Ollama : OLLAMA_ORIGINS).`;
-    }
-    if (data.settings.engine === "webllm" && data.settings.webllmModel !== WEAK_GPU_MODEL && (await isWeakGpu())) {
-      msg += " Ta carte graphique est une puce Intel : seuls les tout petits modèles y tiennent (Qwen 2.5 1.5B). Pour un tuteur plus capable, utilise le serveur local (Ollama).";
     }
     showError(msg, content ? null : () => send(text, { hidden }));
   }
@@ -495,54 +474,28 @@ $("#scrim").onclick = closeNav;
 const settingsDlg = $("#settingsDlg");
 const form = settingsDlg.querySelector("form");
 
-for (const m of WEBLLM_MODELS) form.webllmModel.add(new Option(m.label, m.id));
+for (const m of CLAUDE_MODELS) form.claudeModel.add(new Option(m.label, m.id));
 
 function syncEngineFields() {
   const api = form.engine.value === "api";
-  $("#webllmFields").hidden = api;
+  $("#claudeFields").hidden = api;
   $("#apiFields").hidden = !api;
-}
-
-async function showModelInfo() {
-  const id = form.webllmModel.value;
-  $("#modelInfo").textContent = "…";
-  try {
-    const { vram, cached } = await webllmInfo(id);
-    if (form.webllmModel.value !== id) return;
-    const tooBig = vram > WEAK_GPU_MAX_MB && (await isWeakGpu());
-    $("#modelInfo").textContent = `${vram ? `≈ ${(vram / 1024).toFixed(1)} Go de mémoire graphique. ` : ""}${
-      cached ? "✅ Déjà téléchargé : utilisable hors-ligne." : "⬇️ Sera téléchargé au premier usage (connexion requise une seule fois)."
-    }${tooBig ? " ⚠️ Trop lourd pour ta carte graphique Intel : il risque de planter. Choisis Qwen 2.5 1.5B, ou le serveur local pour un meilleur tuteur." : ""}`;
-    $("#deleteModel").hidden = !cached;
-  } catch {
-    $("#modelInfo").textContent = "";
-  }
 }
 
 function openSettings() {
   const st = data.settings;
-  for (const k of ["language", "level", "goals", "native", "webllmModel", "apiBase", "apiModel", "temperature"]) {
+  for (const k of ["language", "level", "goals", "native", "claudeKey", "claudeModel", "apiBase", "apiModel"]) {
     form[k].value = st[k];
   }
   form.engine.value = st.engine;
-  $("#tempOut").textContent = st.temperature;
   syncEngineFields();
-  showModelInfo();
   closeNav();
   settingsDlg.showModal();
 }
 
 form.engine.forEach((r) => r.addEventListener("change", syncEngineFields));
-form.webllmModel.addEventListener("change", showModelInfo);
-form.temperature.addEventListener("input", () => ($("#tempOut").textContent = form.temperature.value));
-
-$("#deleteModel").onclick = async () => {
-  const id = form.webllmModel.value;
-  if (!confirm("Supprimer ce modèle de l'appareil ? Il faudra le retélécharger (connexion requise).")) return;
-  await deleteWebllmModel(id);
-  if (data.settings.webllmModel === id) engineReady = false;
-  showModelInfo();
-  updateStatus();
+$("#toggleKey").onclick = () => {
+  form.claudeKey.type = form.claudeKey.type === "password" ? "text" : "password";
 };
 
 $("#detectModels").onclick = async () => {
@@ -563,7 +516,7 @@ settingsDlg.addEventListener("close", () => {
   if (settingsDlg.returnValue === "save") {
     const before = JSON.stringify(data.settings);
     const fd = new FormData(form);
-    for (const [k, v] of fd) if (k in DEFAULTS) data.settings[k] = k === "temperature" ? Number(v) : String(v).trim();
+    for (const [k, v] of fd) if (k in DEFAULTS) data.settings[k] = String(v).trim();
     if (JSON.stringify(data.settings) !== before) {
       engineReady = false;
       if (current()) delete current().system;
@@ -577,7 +530,9 @@ settingsDlg.addEventListener("close", () => {
 $("#openSettings").onclick = openSettings;
 
 $("#exportData").onclick = () => {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  // La clé API n'est jamais exportée : le fichier peut être partagé ou perdu.
+  const exported = { ...data, settings: { ...data.settings, claudeKey: "" } };
+  const blob = new Blob([JSON.stringify(exported, null, 2)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = `tuteur-langues-${new Date().toISOString().slice(0, 10)}.json`;
@@ -593,6 +548,8 @@ $("#importData").onchange = async (e) => {
     const imported = JSON.parse(await file.text());
     if (!imported.settings || !Array.isArray(imported.sessions)) throw new Error("format inconnu");
     if (!confirm("Remplacer toutes les données actuelles par celles du fichier ?")) return;
+    // Le fichier exporté ne contient pas la clé API : on garde celle déjà saisie.
+    imported.settings.claudeKey ||= data.settings.claudeKey;
     localStorage.setItem(KEY, JSON.stringify(imported));
     location.reload();
   } catch (err) {
@@ -699,8 +656,4 @@ updateStatus();
 updateVocabCount();
 renderSessions();
 renderMessages();
-if (firstRun) {
-  // Sur une puce graphique Intel, on part du seul modèle qui y fonctionne de façon fiable.
-  if (await isWeakGpu()) data.settings.webllmModel = WEAK_GPU_MODEL;
-  openSettings();
-}
+if (firstRun || (data.settings.engine === "claude" && !data.settings.claudeKey)) openSettings();
