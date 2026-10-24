@@ -306,9 +306,11 @@ function modelMessages(s) {
   const hist = [];
   for (let i = s.messages.length - 1; i >= 0; i--) {
     const m = s.messages[i];
-    budget -= m.content.length;
+    // On renvoie au modèle sa réponse brute : identique à ce qu'il a produit, elle n'a pas à être relue.
+    const content = m.raw ?? m.content;
+    budget -= content.length;
     if (budget < 0 && hist.length) break;
-    hist.unshift({ role: m.role, content: m.content });
+    hist.unshift({ role: m.role, content });
   }
   while (hist.length && hist[0].role !== "user") hist.shift();
   return [{ role: "system", content: sys }, ...hist];
@@ -386,7 +388,7 @@ async function send(text, { hidden = false } = {}) {
   const content = clean(raw);
   if (content) {
     const { added } = remember(raw);
-    const msg = { role: "assistant", content, newWords: added };
+    const msg = { role: "assistant", content, raw, newWords: added };
     s.messages.push(msg);
     el.replaceWith(messageEl(msg));
   } else {
