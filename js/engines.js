@@ -3,6 +3,7 @@
 //  - "api"    : un serveur local compatible OpenAI (Ollama, LM Studio, llama.cpp…).
 
 export const CONTEXT_TOKENS = 8192;
+const PREFILL_CHUNK = 64;
 
 // Modèles proposés (identifiants du catalogue WebLLM), du plus léger au plus capable.
 export const WEBLLM_MODELS = [
@@ -55,14 +56,25 @@ class WebLLMEngine {
       const alt = id.replace("q4f16_1", "q4f32_1");
       if (lib.prebuiltAppConfig.model_list.some((m) => m.model_id === alt)) id = alt;
     }
-    if (this.engine) await this.engine.unload();
-    this.engine = null;
+    await this.reset();
     this.engine = await lib.CreateMLCEngine(
       id,
       { initProgressCallback: (r) => onProgress?.(r.progress, r.text) },
-      { context_window_size: CONTEXT_TOKENS }
+      // Le prompt du tuteur est long : traité d'un bloc, il dépasse le délai que macOS accorde
+      // au GPU (« Device is lost »), surtout sur puce Intel. On le découpe en petits morceaux.
+      { context_window_size: CONTEXT_TOKENS, prefill_chunk_size: PREFILL_CHUNK }
     );
     this.modelId = modelId;
+  }
+
+  // Après une erreur GPU le moteur est inutilisable : on l'oublie pour qu'il soit rechargé.
+  async reset() {
+    const engine = this.engine;
+    this.engine = null;
+    this.modelId = null;
+    try {
+      await engine?.unload();
+    } catch {}
   }
 
   async stream(messages, onDelta, signal, opts) {
@@ -76,6 +88,15 @@ class WebLLMEngine {
         const d = chunk.choices[0]?.delta?.content;
         if (d) onDelta(d);
       }
+    } catch (e) {
+      if (e?.name === "AbortError" && signal.aborted) throw e;
+      await this.reset();
+      if (/device.*lost|lost.*device|mapAsync|out of memory|GPUBuffer/i.test(String(e?.message || e))) {
+        throw new Error(
+          "La carte graphique a abandonné (mémoire graphique insuffisante ou calcul trop long). Réessaie : le modèle va être rechargé. Si ça recommence, choisis un modèle plus léger dans les réglages."
+        );
+      }
+      throw e;
     } finally {
       signal.removeEventListener("abort", onAbort);
     }

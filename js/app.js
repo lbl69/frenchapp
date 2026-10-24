@@ -297,7 +297,11 @@ async function ensureLoaded(engine) {
 }
 
 function modelMessages(s) {
-  const sys = buildSystemPrompt(data.settings, data.vocab, data.fixes);
+  // Prompt figé pour toute la séance : un début de conversation identique permet au moteur
+  // de réutiliser ce qu'il a déjà calculé au lieu de tout retraiter à chaque message.
+  const sys = (s.system ||= buildSystemPrompt(data.settings, data.vocab, data.fixes, {
+    compact: data.settings.engine === "webllm",
+  }));
   let budget = (CONTEXT_TOKENS - 1500) * 3 - sys.length;
   const hist = [];
   for (let i = s.messages.length - 1; i >= 0; i--) {
@@ -395,6 +399,8 @@ async function send(text, { hidden = false } = {}) {
   setBusy(false);
   if (failure) {
     console.error(failure);
+    engineReady = false;
+    updateStatus();
     let msg = failure.message || String(failure);
     if (data.settings.engine === "api" && /fetch|network|load failed/i.test(msg)) {
       msg = `Impossible de joindre le serveur local (${data.settings.apiBase}). Vérifiez qu'il est lancé et qu'il accepte cette origine (pour Ollama : OLLAMA_ORIGINS).`;
@@ -550,7 +556,10 @@ settingsDlg.addEventListener("close", () => {
     const before = JSON.stringify(data.settings);
     const fd = new FormData(form);
     for (const [k, v] of fd) if (k in DEFAULTS) data.settings[k] = k === "temperature" ? Number(v) : String(v).trim();
-    if (JSON.stringify(data.settings) !== before) engineReady = false;
+    if (JSON.stringify(data.settings) !== before) {
+      engineReady = false;
+      if (current()) delete current().system;
+    }
     save();
     updateStatus();
   }
