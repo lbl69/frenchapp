@@ -377,7 +377,8 @@ async function send(text, { hidden = false } = {}) {
       frame ||= requestAnimationFrame(paint);
     }, controller.signal, { temperature: Number(data.settings.temperature) });
   } catch (e) {
-    if (e.name !== "AbortError") failure = e;
+    // Une erreur GPU (« Device is lost ») porte aussi le nom AbortError : seul le bouton Stop est un arrêt voulu.
+    if (!(e.name === "AbortError" && controller.signal.aborted)) failure = e;
   }
   cancelAnimationFrame(frame);
   controller = null;

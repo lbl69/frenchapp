@@ -17,6 +17,13 @@ export const WEBLLM_MODELS = [
   { id: "Qwen3.5-9B-q4f16_1-MLC", label: "Qwen 3.5 9B — le meilleur, lourd" },
 ];
 
+function gpuError(e) {
+  if (!/device.*lost|lost.*device|mapAsync|out of memory|GPUBuffer/i.test(String(e?.message || e))) return e;
+  return new Error(
+    "La carte graphique a abandonné (mémoire graphique insuffisante ou calcul trop long). Réessaie : le modèle va être rechargé. Si ça recommence, choisis un modèle plus léger dans les réglages, ou recharge la page."
+  );
+}
+
 let webllm = null;
 const loadLib = async () => (webllm ??= await import("../vendor/web-llm/index.js"));
 
@@ -57,13 +64,17 @@ class WebLLMEngine {
       if (lib.prebuiltAppConfig.model_list.some((m) => m.model_id === alt)) id = alt;
     }
     await this.reset();
-    this.engine = await lib.CreateMLCEngine(
-      id,
-      { initProgressCallback: (r) => onProgress?.(r.progress, r.text) },
-      // Le prompt du tuteur est long : traité d'un bloc, il dépasse le délai que macOS accorde
-      // au GPU (« Device is lost »), surtout sur puce Intel. On le découpe en petits morceaux.
-      { context_window_size: CONTEXT_TOKENS, prefill_chunk_size: PREFILL_CHUNK }
-    );
+    try {
+      this.engine = await lib.CreateMLCEngine(
+        id,
+        { initProgressCallback: (r) => onProgress?.(r.progress, r.text) },
+        // Traité d'un bloc, le prompt dépasse le délai que macOS accorde au GPU
+        // (« Device is lost »), surtout sur puce Intel : on le découpe en petits morceaux.
+        { context_window_size: CONTEXT_TOKENS, prefill_chunk_size: PREFILL_CHUNK }
+      );
+    } catch (e) {
+      throw gpuError(e);
+    }
     this.modelId = modelId;
   }
 
@@ -91,12 +102,7 @@ class WebLLMEngine {
     } catch (e) {
       if (e?.name === "AbortError" && signal.aborted) throw e;
       await this.reset();
-      if (/device.*lost|lost.*device|mapAsync|out of memory|GPUBuffer/i.test(String(e?.message || e))) {
-        throw new Error(
-          "La carte graphique a abandonné (mémoire graphique insuffisante ou calcul trop long). Réessaie : le modèle va être rechargé. Si ça recommence, choisis un modèle plus léger dans les réglages."
-        );
-      }
-      throw e;
+      throw gpuError(e);
     } finally {
       signal.removeEventListener("abort", onAbort);
     }
